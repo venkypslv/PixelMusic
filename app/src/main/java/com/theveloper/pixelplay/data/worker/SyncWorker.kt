@@ -30,6 +30,7 @@ import com.theveloper.pixelplay.data.navidrome.NavidromeRepository
 import com.theveloper.pixelplay.data.media.AudioMetadataReader
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
+import com.theveloper.pixelplay.data.preferences.PlaylistPreferencesRepository
 import com.theveloper.pixelplay.data.repository.LyricsRepository
 import com.theveloper.pixelplay.utils.AlbumArtCacheManager
 import com.theveloper.pixelplay.utils.AlbumArtUtils
@@ -75,7 +76,9 @@ constructor(
         private val lyricsRepository: LyricsRepository,
         private val telegramDao: TelegramDao,
         private val neteaseDao: NeteaseDao,
-        private val navidromeRepository: NavidromeRepository
+        private val navidromeRepository: NavidromeRepository,
+        private val playlistPreferencesRepository: PlaylistPreferencesRepository,
+        private val youtubeDatastoreRepository: com.theveloper.pixelplay.data.remote.youtube.DatastoreRepository
 ) : CoroutineWorker(appContext, workerParams) {
 
     private val contentResolver: ContentResolver = appContext.contentResolver
@@ -381,9 +384,12 @@ constructor(
                     val navidromeNeedsNetworkSync = navidromeRepository.isLoggedIn && 
                         (System.currentTimeMillis() - navidromeRepository.lastFullSyncTime >= NavidromeRepository.SYNC_THRESHOLD_MS)
                     
+                    val isYoutubeConnected = youtubeDatastoreRepository.cookies.first().toRawCookie().isNotEmpty()
+                    
                     val needsActiveCloudSync = hasTelegramChannels ||
                         neteaseCount > 0 ||
-                        navidromeNeedsNetworkSync
+                        navidromeNeedsNetworkSync ||
+                        isYoutubeConnected
 
                     if (needsActiveCloudSync) {
                         setProgress(
@@ -411,6 +417,12 @@ constructor(
                         syncNavidromeData()
                     } else {
                         Log.d(TAG, "Skipping Navidrome sync — not logged in.")
+                    }
+
+                    if (isYoutubeConnected) {
+                        syncYoutubeData()
+                    } else {
+                        Log.d(TAG, "Skipping YouTube sync — not logged in.")
                     }
 
                     // Recalculate total
@@ -1351,6 +1363,12 @@ constructor(
         private const val NETEASE_PARENT_DIRECTORY = "/Cloud/Netease"
         private const val NETEASE_GENRE = "Netease Cloud"
 
+        private const val YOUTUBE_SONG_ID_OFFSET = 15_000_000_000_000L
+        private const val YOUTUBE_ALBUM_ID_OFFSET = 16_000_000_000_000L
+        private const val YOUTUBE_ARTIST_ID_OFFSET = 17_000_000_000_000L
+        private const val YOUTUBE_PARENT_DIRECTORY = "/Cloud/YouTube"
+        private const val YOUTUBE_GENRE = "YouTube"
+
         // Genre cache - shared across worker instances to avoid refetching on incremental syncs
         private const val GENRE_CACHE_TTL_MS = 60 * 60 * 1000L // 1 hour
         @Volatile private var genreMapCache: Map<Long, String> = emptyMap()
@@ -1798,5 +1816,216 @@ constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Failed to sync Navidrome data", e)
         }
+    }
+
+    private suspend fun syncYoutubeData() {
+        Log.i(TAG, "Syncing YouTube songs to main database (Unified Mode)...")
+        try {
+            val appDatabase = com.theveloper.pixelplay.data.database.youtube.AppDatabase.getInstance(applicationContext)
+            val youtubePlaylists = appDatabase.playlistRepository().getAll()
+            val downloadedSongs = appDatabase.songRepository().getDownloadedSongs()
+
+            val existingUnifiedYoutubeIds = musicDao.getAllYoutubeSongIds()
+
+            if (youtubePlaylists.isEmpty() && downloadedSongs.isEmpty()) {
+                if (existingUnifiedYoutubeIds.isNotEmpty()) {
+                    musicDao.clearAllYoutubeSongs()
+                }
+                // Also delete all YouTube playlists in the main DB
+                val allPlaylists = playlistPreferencesRepository.getPlaylistsOnce()
+                allPlaylists.filter { it.source == "YOUTUBE" }.forEach {
+                    playlistPreferencesRepository.deletePlaylist(it.id)
+                }
+                Log.d(TAG, "No YouTube songs/playlists to sync.")
+                return
+            }
+
+            // Combine all unique songs
+            val allUniqueSongs = mutableMapOf<String, com.theveloper.pixelplay.data.model.youtube.Song>()
+            downloadedSongs.forEach { allUniqueSongs[it.youtubeId] = it }
+            youtubePlaylists.forEach { playlist ->
+                playlist.songs.forEach { allUniqueSongs[it.youtubeId] = it }
+            }
+
+            val songsToInsert = ArrayList<SongEntity>(allUniqueSongs.size)
+            val artistsToInsert = LinkedHashMap<Long, ArtistEntity>()
+            val albumsToInsert = LinkedHashMap<Long, AlbumEntity>()
+            val crossRefsToInsert = mutableListOf<SongArtistCrossRef>()
+
+            allUniqueSongs.values.forEach { ySong ->
+                val songId = toUnifiedYoutubeSongId(ySong.youtubeId)
+                val artistNames = parseYoutubeArtistNames(ySong.artist)
+                val primaryArtistName = artistNames.firstOrNull() ?: "Unknown Artist"
+                val primaryArtistId = toUnifiedYoutubeArtistId(primaryArtistName)
+
+                artistNames.forEachIndexed { index, artistName ->
+                    val artistId = toUnifiedYoutubeArtistId(artistName)
+                    artistsToInsert.putIfAbsent(
+                        artistId,
+                        ArtistEntity(
+                            id = artistId,
+                            name = artistName,
+                            trackCount = 0,
+                            imageUrl = null
+                        )
+                    )
+                    crossRefsToInsert.add(
+                        SongArtistCrossRef(
+                            songId = songId,
+                            artistId = artistId,
+                            isPrimary = index == 0
+                        )
+                    )
+                }
+
+                val albumId = toUnifiedYoutubeAlbumId("YouTube Music")
+                val albumName = "YouTube Music"
+                albumsToInsert.putIfAbsent(
+                    albumId,
+                    AlbumEntity(
+                        id = albumId,
+                        title = albumName,
+                        artistName = primaryArtistName,
+                        artistId = primaryArtistId,
+                        songCount = 0,
+                        dateAdded = System.currentTimeMillis(),
+                        year = 0,
+                        albumArtUriString = ySong.thumbnailPath ?: ySong.thumbnailHref
+                    )
+                )
+
+                // Build artists JSON
+                val youtubeArtistRefs = artistNames.mapIndexed { idx, name ->
+                    ArtistRef(
+                        id = toUnifiedYoutubeArtistId(name),
+                        name = name,
+                        isPrimary = idx == 0
+                    )
+                }
+
+                val durationMs = parseDurationStringToMillis(ySong.duration)
+
+                songsToInsert.add(
+                    SongEntity(
+                        id = songId,
+                        title = ySong.title,
+                        artistName = ySong.artist.ifBlank { primaryArtistName },
+                        artistId = primaryArtistId,
+                        albumArtist = null,
+                        albumName = albumName,
+                        albumId = albumId,
+                        contentUriString = "youtube://${ySong.youtubeId}",
+                        albumArtUriString = ySong.thumbnailPath ?: ySong.thumbnailHref,
+                        duration = durationMs,
+                        genre = YOUTUBE_GENRE,
+                        filePath = ySong.audioFilePath ?: "",
+                        parentDirectoryPath = YOUTUBE_PARENT_DIRECTORY,
+                        isFavorite = false,
+                        lyrics = null,
+                        trackNumber = 0,
+                        year = 0,
+                        dateAdded = System.currentTimeMillis(),
+                        mimeType = "audio/webm",
+                        bitrate = null,
+                        sampleRate = null,
+                        telegramChatId = null,
+                        telegramFileId = null,
+                        artistsJson = serializeArtistRefs(youtubeArtistRefs),
+                        sourceType = SourceType.YOUTUBE
+                    )
+                )
+            }
+
+            val albumCounts = songsToInsert.groupingBy { it.albumId }.eachCount()
+            val finalAlbums = albumsToInsert.values.map { album ->
+                album.copy(songCount = albumCounts[album.id] ?: 0)
+            }
+
+            val currentUnifiedSongIds = songsToInsert.map { it.id }.toSet()
+            val deletedUnifiedSongIds = existingUnifiedYoutubeIds.filter { it !in currentUnifiedSongIds }
+
+            musicDao.incrementalSyncMusicData(
+                songs = songsToInsert,
+                albums = finalAlbums,
+                artists = artistsToInsert.values.toList(),
+                crossRefs = crossRefsToInsert,
+                deletedSongIds = deletedUnifiedSongIds
+            )
+
+            // Sync YouTube Playlists to user preferences/database
+            val syncedPlaylistIds = youtubePlaylists.map { it.info.id }.toSet()
+            val allPlaylists = playlistPreferencesRepository.getPlaylistsOnce()
+
+            // Delete orphaned synced playlists
+            allPlaylists.filter { it.source == "YOUTUBE" && it.id !in syncedPlaylistIds }.forEach {
+                playlistPreferencesRepository.deletePlaylist(it.id)
+            }
+
+            // Upsert actual YouTube playlists
+            youtubePlaylists.forEach { playlist ->
+                val playlistSongIds = playlist.songs.map { toUnifiedYoutubeSongId(it.youtubeId).toString() }
+
+                // Check if already exists in main database to avoid overwriting user edits or custom playlist attributes
+                val existing = allPlaylists.find { it.id == playlist.info.id }
+                if (existing == null) {
+                    playlistPreferencesRepository.createPlaylist(
+                        name = playlist.info.title,
+                        songIds = playlistSongIds,
+                        coverImageUri = playlist.info.coverPath ?: playlist.info.coverHref,
+                        customId = playlist.info.id,
+                        source = "YOUTUBE"
+                    )
+                } else {
+                    playlistPreferencesRepository.updatePlaylist(
+                        existing.copy(
+                            name = playlist.info.title,
+                            songIds = playlistSongIds,
+                            coverImageUri = playlist.info.coverPath ?: playlist.info.coverHref
+                        )
+                    )
+                }
+            }
+
+            Log.i(TAG, "Synced ${songsToInsert.size} YouTube songs and ${youtubePlaylists.size} playlists.")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to sync YouTube data", e)
+        }
+    }
+
+    private fun parseYoutubeArtistNames(rawArtist: String): List<String> {
+        if (rawArtist.isBlank()) return listOf("Unknown Artist")
+        val parsed = rawArtist.split(Regex("\\s*[,/&;+、]\\s*"))
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+        return if (parsed.isEmpty()) listOf("Unknown Artist") else parsed
+    }
+
+    private fun toUnifiedYoutubeSongId(youtubeId: String): Long {
+        return -(YOUTUBE_SONG_ID_OFFSET + youtubeId.hashCode().toLong().absoluteValue)
+    }
+
+    private fun toUnifiedYoutubeAlbumId(albumName: String): Long {
+        return -(YOUTUBE_ALBUM_ID_OFFSET + albumName.lowercase().hashCode().toLong().absoluteValue)
+    }
+
+    private fun toUnifiedYoutubeArtistId(artistName: String): Long {
+        return -(YOUTUBE_ARTIST_ID_OFFSET + artistName.lowercase().hashCode().toLong().absoluteValue)
+    }
+
+    private fun parseDurationStringToMillis(durationStr: String): Long {
+        if (durationStr.isBlank()) return 0L
+        val parts = durationStr.split(":")
+        var seconds = 0L
+        try {
+            when (parts.size) {
+                1 -> seconds = parts[0].toLongOrNull() ?: 0L
+                2 -> seconds = (parts[0].toLongOrNull() ?: 0L) * 60 + (parts[1].toLongOrNull() ?: 0L)
+                3 -> seconds = (parts[0].toLongOrNull() ?: 0L) * 3600 + (parts[1].toLongOrNull() ?: 0L) * 60 + (parts[2].toLongOrNull() ?: 0L)
+            }
+        } catch (e: Exception) {
+            // ignore
+        }
+        return seconds * 1000
     }
 }

@@ -80,12 +80,16 @@ android {
         buildConfigField("String", "TELEGRAM_API_HASH", "\"$telegramApiHash\"")
     }
 
+    val keystoreExists = rootProject.file("keystore.properties").exists() && rootProject.file("vz-pixelplay.jks").exists()
+
     signingConfigs {
-        create("release") {
-            storeFile = file("$rootDir/vz-pixelplay.jks")
-            storePassword = keystoreProperties.getProperty("storePassword") ?: "dummyPassword"
-            keyAlias = keystoreProperties.getProperty("keyAlias") ?: "dummyAlias"
-            keyPassword = keystoreProperties.getProperty("keyPassword") ?: "dummyPassword"
+        if (keystoreExists) {
+            create("release") {
+                storeFile = rootProject.file("vz-pixelplay.jks")
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
         }
     }
 
@@ -95,7 +99,9 @@ android {
         }
 
         release {
-            signingConfig = signingConfigs.getByName("release")
+            if (keystoreExists) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -213,6 +219,7 @@ dependencies {
     implementation(libs.androidx.ui.text.google.fonts)
     implementation(libs.material)
     implementation(libs.androidx.appcompat)
+    implementation("androidx.webkit:webkit:1.12.1")
 
     // DI & Navigation
     implementation(libs.hilt.android)
@@ -250,6 +257,10 @@ dependencies {
     implementation(libs.androidx.graphics.shapes)
 
     // Networking & Serialization
+    implementation(libs.newpipeextractor)
+    implementation(libs.fuel.android)
+    implementation(libs.fuel.json)
+    implementation(libs.androidx.media3.exoplayer.hls)
     implementation(libs.retrofit)
     implementation(libs.converter.gson)
     implementation(libs.okhttp)
@@ -347,4 +358,8 @@ dependencies {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+}
+
+configurations.all {
+    exclude(group = "org.jetbrains.kotlin", module = "kotlin-android-extensions-runtime")
 }

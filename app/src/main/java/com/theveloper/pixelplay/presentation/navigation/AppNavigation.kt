@@ -238,6 +238,9 @@ fun AppNavigation(
                         },
                         onOpenJellyfinDashboard = {
                             navController.navigateSafely(Screen.JellyfinDashboard.route)
+                        },
+                        onOpenYoutubeAuth = {
+                            navController.navigateSafely(Screen.YoutubeAuth.route)
                         }
                     )
                 }
@@ -590,6 +593,19 @@ fun AppNavigation(
             ) {
                 ScreenWrapper(navController = navController, playerViewModel = playerViewModel) {
                     com.theveloper.pixelplay.presentation.jellyfin.dashboard.JellyfinDashboardScreen(
+                        onBack = { navController.popBackStack() }
+                    )
+                }
+            }
+            composable(
+                Screen.YoutubeAuth.route,
+                enterTransition = { enterTransition() },
+                exitTransition = { exitTransition() },
+                popEnterTransition = { popEnterTransition() },
+                popExitTransition = { popExitTransition() },
+            ) {
+                ScreenWrapper(navController = navController, playerViewModel = playerViewModel) {
+                    com.theveloper.pixelplay.presentation.screens.youtube.AuthScreen(
                         onBack = { navController.popBackStack() }
                     )
                 }

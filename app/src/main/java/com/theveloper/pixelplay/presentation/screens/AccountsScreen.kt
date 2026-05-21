@@ -60,6 +60,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.foundation.background
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -96,10 +99,22 @@ fun AccountsScreen(
     onOpenQqMusicDashboard: () -> Unit = {},
     onOpenNavidromeDashboard: () -> Unit = {},
     onOpenJellyfinDashboard: () -> Unit = {},
+    onOpenYoutubeAuth: () -> Unit = {},
     viewModel: AccountsViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val isSyncing by viewModel.isSyncing.collectAsStateWithLifecycle(initialValue = false)
+
+    val nonYoutubeConnected = remember(uiState.connectedAccounts) {
+        uiState.connectedAccounts.filter { it.service != ExternalServiceAccount.YOUTUBE }
+    }
+    val nonYoutubeDisconnected = remember(uiState.disconnectedServices) {
+        uiState.disconnectedServices.filter { it != ExternalServiceAccount.YOUTUBE }
+    }
+    val youtubeAccount = remember(uiState.connectedAccounts) {
+        uiState.connectedAccounts.firstOrNull { it.service == ExternalServiceAccount.YOUTUBE }
+    }
 
     val density = LocalDensity.current
     val coroutineScope = rememberCoroutineScope()
@@ -186,7 +201,33 @@ fun AccountsScreen(
                 )
             }
 
-            if (uiState.connectedAccounts.isNotEmpty()) {
+            // YouTube Account Card (Crimson brand themed)
+            item {
+                YouTubeAccountCard(
+                    account = youtubeAccount,
+                    isSyncing = isSyncing,
+                    onSignIn = {
+                        openService(
+                            context = context,
+                            service = ExternalServiceAccount.YOUTUBE,
+                            onOpenNeteaseDashboard = onOpenNeteaseDashboard,
+                            onOpenQqMusicDashboard = onOpenQqMusicDashboard,
+                            onOpenNavidromeDashboard = onOpenNavidromeDashboard,
+                            onOpenJellyfinDashboard = onOpenJellyfinDashboard,
+                            onOpenYoutubeAuth = onOpenYoutubeAuth,
+                            preferNeteaseDashboard = false
+                        )
+                    },
+                    onSync = {
+                        viewModel.syncLibrary()
+                    },
+                    onLogout = {
+                        viewModel.logout(ExternalServiceAccount.YOUTUBE)
+                    }
+                )
+            }
+
+            if (nonYoutubeConnected.isNotEmpty()) {
                 item {
                     Text(
                         text = stringResource(R.string.presentation_batch_b_accounts_linked_services),
@@ -198,7 +239,7 @@ fun AccountsScreen(
                 }
 
                 items(
-                    items = uiState.connectedAccounts,
+                    items = nonYoutubeConnected,
                     key = { it.service.name }
                 ) { account ->
                     ConnectedAccountCard(
@@ -211,6 +252,7 @@ fun AccountsScreen(
                                 onOpenQqMusicDashboard = onOpenQqMusicDashboard,
                                 onOpenNavidromeDashboard = onOpenNavidromeDashboard,
                                 onOpenJellyfinDashboard = onOpenJellyfinDashboard,
+                                onOpenYoutubeAuth = onOpenYoutubeAuth,
                                 preferNeteaseDashboard = true
                             )
                         },
@@ -228,10 +270,22 @@ fun AccountsScreen(
                         } else null
                     )
                 }
-            } else {
+            }
+
+            if (nonYoutubeDisconnected.isNotEmpty()) {
+                item {
+                    Text(
+                        text = "Available Services",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(start = 4.dp, top = 4.dp)
+                    )
+                }
+
                 item {
                     EmptyAccountsCard(
-                        disconnectedServices = uiState.disconnectedServices,
+                        disconnectedServices = nonYoutubeDisconnected,
                         onConnect = { service ->
                             openService(
                                 context = context,
@@ -240,9 +294,12 @@ fun AccountsScreen(
                                 onOpenQqMusicDashboard = onOpenQqMusicDashboard,
                                 onOpenNavidromeDashboard = onOpenNavidromeDashboard,
                                 onOpenJellyfinDashboard = onOpenJellyfinDashboard,
+                                onOpenYoutubeAuth = onOpenYoutubeAuth,
                                 preferNeteaseDashboard = false
                             )
-                        }
+                        },
+                        title = if (nonYoutubeConnected.isNotEmpty()) "Connect More Services" else stringResource(R.string.presentation_batch_b_accounts_no_linked_title),
+                        body = if (nonYoutubeConnected.isNotEmpty()) "Link additional services to expand your unified music library." else stringResource(R.string.presentation_batch_b_accounts_no_linked_body)
                     )
                 }
             }
@@ -525,10 +582,10 @@ private fun ConnectedAccountCard(
 @Composable
 private fun EmptyAccountsCard(
     disconnectedServices: List<ExternalServiceAccount>,
-    onConnect: (ExternalServiceAccount) -> Unit
+    onConnect: (ExternalServiceAccount) -> Unit,
+    title: String = stringResource(R.string.presentation_batch_b_accounts_no_linked_title),
+    body: String = stringResource(R.string.presentation_batch_b_accounts_no_linked_body)
 ) {
-    val noLinkedTitle = stringResource(R.string.presentation_batch_b_accounts_no_linked_title)
-    val noLinkedBody = stringResource(R.string.presentation_batch_b_accounts_no_linked_body)
     val connectTemplate = stringResource(R.string.presentation_batch_b_accounts_connect_service)
     val serviceSoonTemplate = stringResource(R.string.presentation_batch_b_accounts_service_paren_coming_soon)
     Card(
@@ -542,12 +599,12 @@ private fun EmptyAccountsCard(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                text = noLinkedTitle,
+                text = title,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
             Text(
-                text = noLinkedBody,
+                text = body,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -561,6 +618,7 @@ private fun EmptyAccountsCard(
                     ExternalServiceAccount.GOOGLE_DRIVE -> painterResource(R.drawable.rounded_drive_export_24)
                     ExternalServiceAccount.JELLYFIN -> painterResource(R.drawable.ic_jellyfin)
                     ExternalServiceAccount.NAVIDROME -> painterResource(R.drawable.ic_navidrome_md3)
+                    ExternalServiceAccount.YOUTUBE -> null
                 }
                 FilledTonalButton(
                     onClick = { if (!isComingSoon) onConnect(service) },
@@ -572,11 +630,19 @@ private fun EmptyAccountsCard(
                     ),
                     modifier = Modifier.fillMaxWidth().height(48.dp)
                 ) {
-                    Icon(
-                        painter = painter,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
+                    if (painter != null) {
+                        Icon(
+                            painter = painter,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    } else {
+                        Icon(
+                            imageVector = accountIcon(service),
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                     Spacer(modifier = Modifier.size(8.dp))
                     Text(
                         text = if (isComingSoon) {
@@ -651,6 +717,14 @@ private fun servicePalette(service: ExternalServiceAccount): ServicePalette {
             primaryActionContainer = Color(0xFFE3F2FD),
             primaryActionTint = Color(0xFF1565C0)
         )
+        ExternalServiceAccount.YOUTUBE -> ServicePalette(
+            iconContainer = MaterialTheme.colorScheme.errorContainer,
+            iconTint = MaterialTheme.colorScheme.onErrorContainer,
+            statusContainer = Color(0xFFFFE3E1),
+            statusTint = Color(0xFF7A1D16),
+            primaryActionContainer = MaterialTheme.colorScheme.errorContainer,
+            primaryActionTint = MaterialTheme.colorScheme.onErrorContainer
+        )
     }
 }
 
@@ -662,6 +736,7 @@ private fun accountIcon(service: ExternalServiceAccount): ImageVector {
         ExternalServiceAccount.QQ_MUSIC -> Icons.Rounded.MusicNote
         ExternalServiceAccount.NAVIDROME -> Icons.Rounded.CloudQueue
         ExternalServiceAccount.JELLYFIN -> Icons.Rounded.CloudQueue
+        ExternalServiceAccount.YOUTUBE -> Icons.Rounded.MusicNote
     }
 }
 
@@ -717,6 +792,7 @@ private fun serviceDisplayName(service: ExternalServiceAccount): String {
         ExternalServiceAccount.QQ_MUSIC -> stringResource(R.string.screen_qq_music_dashboard_title)
         ExternalServiceAccount.NAVIDROME -> stringResource(R.string.cd_subsonic_logo)
         ExternalServiceAccount.JELLYFIN -> stringResource(R.string.auth_jellyfin_title)
+        ExternalServiceAccount.YOUTUBE -> "YouTube Client"
     }
 }
 
@@ -727,6 +803,7 @@ private fun openService(
     onOpenQqMusicDashboard: () -> Unit,
     onOpenNavidromeDashboard: () -> Unit,
     onOpenJellyfinDashboard: () -> Unit,
+    onOpenYoutubeAuth: () -> Unit,
     preferNeteaseDashboard: Boolean
 ) {
     when (service) {
@@ -779,6 +856,9 @@ private fun openService(
                 )
             }
         }
+        ExternalServiceAccount.YOUTUBE -> {
+            onOpenYoutubeAuth()
+        }
     }
 }
 
@@ -790,4 +870,210 @@ private fun safeStartActivity(
         .onFailure {
             Toast.makeText(context, context.getString(R.string.accounts_unable_open_screen), Toast.LENGTH_SHORT).show()
         }
+}
+
+@Composable
+private fun YouTubeAccountCard(
+    account: ExternalAccountUiModel?,
+    isSyncing: Boolean,
+    onSignIn: () -> Unit,
+    onSync: () -> Unit,
+    onLogout: () -> Unit
+) {
+    val cardShape = AbsoluteSmoothCornerShape(28.dp, 60)
+    val isConnected = account != null
+
+    Card(
+        shape = cardShape,
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        Color(0xFF4A0E17), // Deep burgundy
+                        Color(0xFF8C1D24)  // Warm crimson red
+                    )
+                ),
+                shape = cardShape
+            ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = AbsoluteSmoothCornerShape(16.dp, 60),
+                    color = Color.White.copy(alpha = 0.15f)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.MusicNote,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier
+                            .padding(10.dp)
+                            .size(20.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "YouTube Client",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Text(
+                        text = if (isConnected) "Active Session Linked" else "Sync your online music library",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White.copy(alpha = 0.7f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                if (isConnected) {
+                    Surface(
+                        shape = AbsoluteSmoothCornerShape(12.dp, 60),
+                        color = Color.White.copy(alpha = 0.2f)
+                    ) {
+                        Text(
+                            text = "Linked",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+            }
+
+            if (isConnected && account != null) {
+                Surface(
+                    shape = AbsoluteSmoothCornerShape(14.dp, 60),
+                    color = Color.White.copy(alpha = 0.1f)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Sync,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = account.syncedContentLabel,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White
+                        )
+                    }
+                }
+
+                HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
+
+                FilledTonalButton(
+                    onClick = onSync,
+                    enabled = !isSyncing,
+                    shape = AbsoluteSmoothCornerShape(18.dp, 60),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = Color.White,
+                        contentColor = Color(0xFF8C1D24),
+                        disabledContainerColor = Color.White.copy(alpha = 0.3f),
+                        disabledContentColor = Color.White.copy(alpha = 0.6f)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                ) {
+                    if (isSyncing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = Color(0xFF8C1D24),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Syncing Library...",
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.Sync,
+                            contentDescription = null
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Sync Library Now",
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = onLogout,
+                    enabled = !account.isLoggingOut,
+                    shape = AbsoluteSmoothCornerShape(18.dp, 60),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f)),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                ) {
+                    if (account.isLoggingOut) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.Logout,
+                            contentDescription = null
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (account.isLoggingOut) "Disconnecting..." else "Disconnect Account",
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            } else {
+                FilledTonalButton(
+                    onClick = onSignIn,
+                    shape = AbsoluteSmoothCornerShape(18.dp, 60),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = Color.White,
+                        contentColor = Color(0xFF8C1D24)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Link,
+                        contentDescription = null
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Sign In to YouTube",
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
 }

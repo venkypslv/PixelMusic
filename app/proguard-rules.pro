@@ -213,3 +213,7 @@
     public static int d(...);
     public static int i(...);
 }
+
+# Missing classes for JSoup Re2j regex delegate and Mozilla Rhino JSON converter bean introspection
+-dontwarn com.google.re2j.**
+-dontwarn java.beans.**

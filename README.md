@@ -1,4 +1,4 @@
-# PixelPlayer 🎵
+# Pixel Music 🎵
 
 <p align="center">
   <img src="assets/icon.png" alt="App Icon" width="128"/>
@@ -17,12 +17,6 @@
 </p>
 
 <p align="center">
-    <a href="https://github.com/theovilardo/PixelPlayer/releases/latest">
-        <img src="https://img.shields.io/github/v/release/theovilardo/PixelPlayer?include_prereleases&logo=github&style=for-the-badge&label=Latest%20Release" alt="Latest Release">
-    </a>
-    <a href="https://github.com/theovilardo/PixelPlayer/releases">
-        <img src="https://img.shields.io/github/downloads/theovilardo/PixelPlayer/total?logo=github&style=for-the-badge" alt="Total Downloads">
-    </a>
     <img src="https://img.shields.io/badge/Android-10%2B-green?style=for-the-badge&logo=android" alt="Android 11+">
     <img src="https://img.shields.io/badge/Kotlin-100%25-purple?style=for-the-badge&logo=kotlin" alt="Kotlin">
 </p>
@@ -89,19 +83,19 @@
 
 | Category | Technology |
 |----------|------------|
-| **Language** | [Kotlin](https://kotlinlang.org/) 100% |
-| **UI Framework** | [Jetpack Compose](https://developer.android.com/jetpack/compose) |
-| **Design System** | [Material Design 3](https://m3.material.io/) |
-| **Audio Engine** | [Media3 ExoPlayer](https://developer.android.com/guide/topics/media/media3) + FFmpeg |
+| **Language** | Kotlin 100% |
+| **UI Framework** | Jetpack Compose |
+| **Design System** | Material Design 3 |
+| **Audio Engine** | Media3 ExoPlayer + FFmpeg |
 | **Architecture** | MVVM with StateFlow/SharedFlow |
-| **DI** | [Hilt](https://dagger.dev/hilt/) |
-| **Database** | [Room](https://developer.android.com/training/data-storage/room) |
-| **Networking** | [Retrofit](https://square.github.io/retrofit/) + OkHttp |
-| **Image Loading** | [Coil](https://coil-kt.github.io/coil/) |
+| **DI** | Hilt |
+| **Database** | Room |
+| **Networking** | Retrofit + OkHttp |
+| **Image Loading** | Coil |
 | **Async** | Kotlin Coroutines & Flow |
 | **Background Tasks** | WorkManager |
-| **Metadata** | [TagLib](https://github.com/nicholaus/taglib-android) |
-| **Widgets** | [Glance](https://developer.android.com/jetpack/compose/glance) |
+| **Metadata** | TagLib |
+| **Widgets** | Glance |
 
 ---
 
@@ -120,47 +114,18 @@
 - Android SDK 29+
 - JDK 11+
 
-### Installation
+### Setup
 
-1. **Clone the repository**
-   ```sh
-   git clone https://github.com/theovilardo/PixelPlayer.git
-   ```
-
-2. **Open in Android Studio**
-   - Open Android Studio
-   - Select "Open an Existing Project"
-   - Navigate to the cloned directory
-
-3. **Sync and Build**
-   - Wait for Gradle to sync dependencies
-   - Build the project (Build → Make Project)
-
-4. **Run**
-   - Connect a device or start an emulator
-   - Click Run (▶️)
-
----
-
-## ⬇️ Download
-
-<p align="center">
-  <a href="https://github.com/theovilardo/PixelPlayer/releases/latest">
-    <img src="https://raw.githubusercontent.com/Kunzisoft/Github-badge/main/get-it-on-github.png" alt="Get it on GitHub" height="60">
-  </a>
-</p>
-
-<p align="center">
-  <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22com.theveloper.pixelplay%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2Ftheovilardo%2FPixelPlayer%22%2C%22author%22%3A%22theovilardo%22%2C%22name%22%3A%22PixelPlayer%22%2C%22supportFixedAPKURL%22%3Afalse%7D">
-    <img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" alt="Get it on Obtainium" height="50">
-  </a>
-</p>
+1. Open the project in Android Studio  
+2. Wait for Gradle sync to complete  
+3. Build the project  
+4. Run on a physical device or emulator  
 
 ---
 
 ## 📂 Project Structure
 
-```
+```text
 app/src/main/java/com/theveloper/pixelplay/
 ├── data/
 │   ├── database/       # Room entities, DAOs, migrations
@@ -180,28 +145,3 @@ app/src/main/java/com/theveloper/pixelplay/
 │   ├── glancewidget/   # Home screen widgets
 │   └── theme/          # Colors, typography, theming
 └── utils/              # Extensions and utilities
-```
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-<p align="center">
-  Made with ❤️ by <a href="https://github.com/theovilardo">theovilardo</a>
-</p>

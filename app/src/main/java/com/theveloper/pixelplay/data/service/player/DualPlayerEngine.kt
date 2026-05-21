@@ -89,7 +89,7 @@ class DualPlayerEngine @Inject constructor(
         private const val AUDIO_OFFLOAD_BUFFERING_FALLBACK_MS = 4_000L
         private const val MAX_AUXILIARY_TIMELINE_ITEMS = 200
         private val LOCAL_MEDIA_SCHEMES = setOf("content", "file", "android.resource")
-        private val REMOTE_MEDIA_SCHEMES = setOf("http", "https", "telegram", "netease", "qqmusic", "navidrome", "jellyfin", "gdrive")
+        private val REMOTE_MEDIA_SCHEMES = setOf("http", "https", "telegram", "netease", "qqmusic", "navidrome", "jellyfin", "gdrive", "youtube")
     }
 
     data class TransitionTarget(
@@ -257,7 +257,7 @@ class DualPlayerEngine @Inject constructor(
 
                         for (uriToResolve in itemsToPreResolve) {
                             val scheme = uriToResolve.scheme
-                            if (scheme == "telegram" || scheme == "netease" || scheme == "qqmusic" || scheme == "navidrome" || scheme == "jellyfin" || scheme == "gdrive") {
+                            if (scheme == "telegram" || scheme == "netease" || scheme == "qqmusic" || scheme == "navidrome" || scheme == "jellyfin" || scheme == "gdrive" || scheme == "youtube") {
                                 resolveCloudUri(uriToResolve)
                             }
                         }
@@ -719,6 +719,7 @@ class DualPlayerEngine @Inject constructor(
             "navidrome" -> resolveNavidromeUriAsync(uriString)
             "jellyfin" -> resolveJellyfinUriAsync(uriString)
             "gdrive" -> resolveGDriveUriAsync(uriString)
+            "youtube" -> resolveYoutubeUriAsync(uriString)
             else -> null
         }
 
@@ -782,6 +783,22 @@ class DualPlayerEngine @Inject constructor(
         }
         if (!gdriveStreamProxy.ensureReady(5_000L)) return@withContext null
         gdriveStreamProxy.resolveGDriveUri(uriString)?.let { Uri.parse(it) }
+    }
+
+    private suspend fun resolveYoutubeUriAsync(uriString: String): Uri? = withContext(Dispatchers.IO) {
+        try {
+            val youtubeId = uriString.substringAfter("youtube://")
+            val youtubeSong = com.theveloper.pixelplay.data.model.youtube.Song(youtubeId = youtubeId)
+            val path = com.theveloper.pixelplay.data.remote.youtube.YoutubeHelper.getSongPlayerUrl(context, youtubeSong, allowLocal = true)
+            if (path.startsWith("http")) {
+                Uri.parse(path)
+            } else {
+                Uri.fromFile(File(path))
+            }
+        } catch (e: Exception) {
+            Timber.tag("DualPlayerEngine").e(e, "resolveYoutubeUriAsync failed for $uriString")
+            null
+        }
     }
 
     suspend fun resolveMediaItem(mediaItem: MediaItem): MediaItem {

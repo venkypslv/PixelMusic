@@ -88,6 +88,11 @@ class PixelPlayApplication : Application(), ImageLoaderFactory, Configuration.Pr
     override fun onCreate() {
         super.onCreate()
 
+        // Initialize NewPipe YouTube Extractor
+        org.schabi.newpipe.extractor.NewPipe.init(
+            com.theveloper.pixelplay.data.remote.youtube.YoutubeExtractor(okhttp3.OkHttpClient())
+        )
+
         // Benchmark variant intentionally restarts/kills app process during tests.
         // Avoid persisting those events as user-facing crash reports.
         if (BuildConfig.BUILD_TYPE != "benchmark") {

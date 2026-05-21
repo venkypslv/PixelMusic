@@ -1,0 +1,140 @@
+package com.theveloper.pixelplay.data.remote.youtube
+
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import com.theveloper.pixelplay.data.remote.youtube.UmihiHelper.printe
+import com.theveloper.pixelplay.data.remote.youtube.UmihiHelper.printd
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/**
+ * AutoQueueManager — Radio Mode
+ *
+ * Watches the player queue and automatically appends YouTube-suggested songs
+ * when there are ≤2 songs remaining after the current one.
+ *
+ * Call [attach] from your playback service's onCreate() and [detach] from onDestroy().
+ */
+object AutoQueueManager {
+
+    private const val TRIGGER_REMAINING = 2
+    private const val MAX_HISTORY = 30
+
+    private var fetchJob: Job? = null
+    private var lastFetchedVideoId: String? = null
+    private val addedVideoIds = mutableSetOf<String>()
+    private var scope: CoroutineScope? = null
+    private var datastoreRepository: DatastoreRepository? = null
+    private val songRepository = SongRepository()
+    private var playerRef: Player? = null
+
+    private val playerListener = object : Player.Listener {
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            checkAndRefillQueue()
+        }
+
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            if (playbackState == Player.STATE_ENDED) {
+                checkAndRefillQueue()
+            }
+        }
+    }
+
+    fun attach(player: Player, datastoreRepo: DatastoreRepository, coroutineScope: CoroutineScope) {
+        scope = coroutineScope
+        datastoreRepository = datastoreRepo
+        playerRef = player
+        player.addListener(playerListener)
+        printd("AutoQueueManager attached")
+    }
+
+    fun detach(player: Player?) {
+        player?.removeListener(playerListener)
+        playerRef = null
+        fetchJob?.cancel()
+        scope = null
+        datastoreRepository = null
+    }
+
+    private fun checkAndRefillQueue() {
+        val currentScope = scope ?: return
+        val player = playerRef ?: return
+
+        currentScope.launch(Dispatchers.IO) {
+            val settings = datastoreRepository?.settings?.first() ?: return@launch
+            if (!settings.autoQueueEnabled) return@launch
+
+            val playerState = withContext(Dispatchers.Main) {
+                if (playerRef == null) null
+                else {
+                    val currentIndex = player.currentMediaItemIndex
+                    val totalCount = player.mediaItemCount
+                    val remaining = totalCount - currentIndex - 1
+                    val currentId = player.currentMediaItem?.mediaId
+                    Triple(remaining, currentId, totalCount)
+                }
+            } ?: return@launch
+
+            val (remaining, currentId, _) = playerState
+            if (remaining > TRIGGER_REMAINING) return@launch
+            if (currentId == null || currentId == lastFetchedVideoId) return@launch
+            lastFetchedVideoId = currentId
+
+            printd("AutoQueueManager: Only $remaining songs remaining. Fetching related for $currentId")
+            fetchAndAppend(currentId, player)
+        }
+    }
+
+    private suspend fun fetchAndAppend(videoId: String, player: Player) {
+        try {
+            songRepository.getRelatedSongs(videoId).collect { result ->
+                when (result) {
+                    is ApiResult.Success -> {
+                        val newSongs = result.data
+                            .filter { it.youtubeId !in addedVideoIds }
+                            .take(5)
+
+                        if (newSongs.isEmpty()) {
+                            printd("AutoQueueManager: No new related songs found")
+                            return@collect
+                        }
+
+                        val mediaItems = newSongs.map { it.mediaItem }
+
+                        withContext(Dispatchers.Main) {
+                            player.addMediaItems(mediaItems)
+                        }
+
+                        newSongs.forEach { addedVideoIds.add(it.youtubeId) }
+
+                        // Trim history to avoid unbounded growth
+                        if (addedVideoIds.size > MAX_HISTORY) {
+                            val excess = addedVideoIds.size - MAX_HISTORY
+                            val toRemove = addedVideoIds.take(excess)
+                            addedVideoIds.removeAll(toRemove.toSet())
+                        }
+
+                        printd("AutoQueueManager: Appended ${newSongs.size} songs to queue")
+                    }
+                    is ApiResult.Error -> {
+                        printe("AutoQueueManager: Failed to fetch related songs: ${result.exception.message}")
+                    }
+                    else -> {}
+                }
+            }
+        } catch (e: Exception) {
+            printe("AutoQueueManager: Exception fetching related songs: ${e.message}")
+        }
+    }
+
+    /** Call to reset when the user manually clears the queue */
+    fun reset() {
+        lastFetchedVideoId = null
+        addedVideoIds.clear()
+        fetchJob?.cancel()
+    }
+}

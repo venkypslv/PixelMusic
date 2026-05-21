@@ -20,6 +20,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
 import org.drinkless.tdlib.TdApi
 
 enum class ExternalServiceAccount {
@@ -28,7 +30,8 @@ enum class ExternalServiceAccount {
     NETEASE,
     QQ_MUSIC,
     NAVIDROME,
-    JELLYFIN
+    JELLYFIN,
+    YOUTUBE
 }
 
 data class ExternalAccountUiModel(
@@ -52,8 +55,19 @@ class AccountsViewModel @Inject constructor(
     private val neteaseRepository: NeteaseRepository,
     private val qqMusicRepository: QqMusicRepository,
     private val navidromeRepository: NavidromeRepository,
-    private val jellyfinRepository: JellyfinRepository
+    private val jellyfinRepository: JellyfinRepository,
+    private val datastoreRepository: com.theveloper.pixelplay.data.remote.youtube.DatastoreRepository,
+    private val syncManager: com.theveloper.pixelplay.data.worker.SyncManager,
+    @ApplicationContext private val context: Context
 ) : ViewModel() {
+
+    val isSyncing = syncManager.isSyncing
+
+    fun syncLibrary() {
+        viewModelScope.launch {
+            syncManager.sync()
+        }
+    }
 
     private val loggingOutServices = MutableStateFlow<Set<ExternalServiceAccount>>(emptySet())
 
@@ -101,6 +115,13 @@ class AccountsViewModel @Inject constructor(
         connected to playlistCount
     }
 
+    private val youtubeStateFlow = combine(
+        datastoreRepository.cookies.map { it.toRawCookie().isNotEmpty() }.distinctUntilChanged(),
+        com.theveloper.pixelplay.data.database.youtube.AppDatabase.getInstance(context).playlistRepository().observeAll().map { it.size }
+    ) { connected, playlistCount ->
+        connected to playlistCount
+    }
+
     val uiState: StateFlow<AccountsUiState> = combine(
         combine(
             listOf(
@@ -109,7 +130,8 @@ class AccountsViewModel @Inject constructor(
                 neteaseStateFlow,
                 qqMusicStateFlow,
                 navidromeStateFlow,
-                jellyfinStateFlow
+                jellyfinStateFlow,
+                youtubeStateFlow
             )
         ) { it.toList() },
         loggingOutServices
@@ -120,6 +142,7 @@ class AccountsViewModel @Inject constructor(
         val (qqConnected, qqPlaylistCount) = states[3] as Pair<Boolean, Int>
         val (navidromeConnected, navidromePlaylistCount) = states[4] as Pair<Boolean, Int>
         val (jellyfinConnected, jellyfinPlaylistCount) = states[5] as Pair<Boolean, Int>
+        val (youtubeConnected, youtubePlaylistCount) = states[6] as Pair<Boolean, Int>
 
         val connectedAccounts = buildList {
             if (telegramConnected) {
@@ -224,6 +247,21 @@ class AccountsViewModel @Inject constructor(
                     )
                 )
             }
+            if (youtubeConnected) {
+                add(
+                    ExternalAccountUiModel(
+                        service = ExternalServiceAccount.YOUTUBE,
+                        title = "YouTube Client",
+                        accountLabel = "YouTube session connected",
+                        syncedContentLabel = formatCount(
+                            count = youtubePlaylistCount,
+                            singular = "synced playlist",
+                            plural = "synced playlists"
+                        ),
+                        isLoggingOut = ExternalServiceAccount.YOUTUBE in activeLogouts
+                    )
+                )
+            }
         }
 
         val disconnectedServices = buildList {
@@ -233,6 +271,7 @@ class AccountsViewModel @Inject constructor(
             if (!qqConnected) add(ExternalServiceAccount.QQ_MUSIC)
             if (!navidromeConnected) add(ExternalServiceAccount.NAVIDROME)
             if (!jellyfinConnected) add(ExternalServiceAccount.JELLYFIN)
+            if (!youtubeConnected) add(ExternalServiceAccount.YOUTUBE)
         }
 
         AccountsUiState(
@@ -259,6 +298,11 @@ class AccountsViewModel @Inject constructor(
                         ExternalServiceAccount.QQ_MUSIC -> qqMusicRepository.logout()
                         ExternalServiceAccount.NAVIDROME -> navidromeRepository.logout()
                         ExternalServiceAccount.JELLYFIN -> jellyfinRepository.logout()
+                        ExternalServiceAccount.YOUTUBE -> {
+                            datastoreRepository.saveCookies(com.theveloper.pixelplay.data.model.youtube.Cookies(""))
+                            datastoreRepository.saveDataSyncId("")
+                            com.theveloper.pixelplay.data.database.youtube.AppDatabase.clearDownloads(context)
+                        }
                     }
                 }
             } finally {

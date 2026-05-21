@@ -2,6 +2,7 @@ package com.theveloper.pixelplay.presentation.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.WorkInfo
 import com.theveloper.pixelplay.data.database.MusicDao
 import com.theveloper.pixelplay.data.database.toArtist
 import com.theveloper.pixelplay.data.model.Artist
@@ -15,6 +16,7 @@ import com.theveloper.pixelplay.utils.AudioMetaUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.io.File
 import javax.inject.Inject
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -31,6 +33,7 @@ class SongInfoBottomSheetViewModel @Inject constructor(
     private val wearPhoneTransferSender: WearPhoneTransferSender,
     private val transferStateStore: PhoneWatchTransferStateStore,
     private val musicDao: MusicDao,
+    private val downloadRepository: com.theveloper.pixelplay.data.remote.youtube.DownloadRepository,
 ) : ViewModel() {
 
     data class SongLocationInfo(
@@ -47,6 +50,14 @@ class SongInfoBottomSheetViewModel @Inject constructor(
     private val _isWatchAvailabilityResolved = MutableStateFlow(false)
     val isWatchAvailabilityResolved: StateFlow<Boolean> = _isWatchAvailabilityResolved.asStateFlow()
     private val _isRefreshingWatchAvailability = MutableStateFlow(false)
+
+    private val _isSongDownloaded = MutableStateFlow(false)
+    val isSongDownloaded: StateFlow<Boolean> = _isSongDownloaded.asStateFlow()
+
+    private val _isSongDownloading = MutableStateFlow(false)
+    val isSongDownloading: StateFlow<Boolean> = _isSongDownloading.asStateFlow()
+
+    private var downloadJob: Job? = null
 
     private val _isRequestingToWatch = MutableStateFlow(false)
     val watchTransfers: StateFlow<Map<String, PhoneWatchTransferState>> = transferStateStore.transfers
@@ -206,6 +217,75 @@ class SongInfoBottomSheetViewModel @Inject constructor(
         return transferStateStore.isSongSavedOnAllReachableWatches(songId)
     }
 
+    fun loadDownloadState(song: Song) {
+        val youtubeId = song.youtubeId
+        if (youtubeId == null) {
+            _isSongDownloaded.value = false
+            _isSongDownloading.value = false
+            return
+        }
+
+        downloadJob?.cancel()
+        downloadJob = viewModelScope.launch {
+            // Initial check
+            _isSongDownloaded.value = downloadRepository.isSongDownloaded(youtubeId)
+
+            // Observe the work manager flow for this song
+            downloadRepository.getSongDownloadWorkInfoFlow(youtubeId).collect { workInfos ->
+                val active = workInfos.any {
+                    it.state == WorkInfo.State.ENQUEUED ||
+                            it.state == WorkInfo.State.RUNNING ||
+                            it.state == WorkInfo.State.BLOCKED
+                }
+                _isSongDownloading.value = active
+
+                if (workInfos.any { it.state == WorkInfo.State.SUCCEEDED }) {
+                    _isSongDownloaded.value = true
+                }
+                if (workInfos.any { it.state == WorkInfo.State.FAILED || it.state == WorkInfo.State.CANCELLED }) {
+                    _isSongDownloaded.value = downloadRepository.isSongDownloaded(youtubeId)
+                }
+            }
+        }
+    }
+
+    fun downloadYoutubeSong(song: Song) {
+        val youtubeId = song.youtubeId ?: return
+        viewModelScope.launch {
+            val youtubeSong = com.theveloper.pixelplay.data.model.youtube.Song(
+                youtubeId = youtubeId,
+                title = song.title,
+                artist = song.artist,
+                duration = com.theveloper.pixelplay.utils.formatDuration(song.duration),
+                thumbnailHref = song.albumArtUriString ?: ""
+            )
+            val playlist = com.theveloper.pixelplay.data.model.youtube.Playlist(
+                info = com.theveloper.pixelplay.data.model.youtube.PlaylistInfo(
+                    id = com.theveloper.pixelplay.data.remote.youtube.Constants.Downloads.DOWNLOADED_PLAYLIST_ID,
+                    title = "Downloaded Songs"
+                ),
+                songs = listOf(youtubeSong)
+            )
+            downloadRepository.downloadSong(playlist, youtubeSong)
+        }
+    }
+
+    fun deleteYoutubeSong(song: Song) {
+        val youtubeId = song.youtubeId ?: return
+        viewModelScope.launch {
+            downloadRepository.deleteSong(youtubeId)
+            _isSongDownloaded.value = false
+            _isSongDownloading.value = false
+        }
+    }
+
+    fun cancelYoutubeSongDownload(song: Song) {
+        val youtubeId = song.youtubeId ?: return
+        cancelWatchTransfer(youtubeId) // also cancel watch if any
+        downloadRepository.cancelSongDownload(youtubeId)
+        _isSongDownloading.value = false
+    }
+
     private fun getCloudProviderLabel(contentUriString: String): String? {
         return when {
             contentUriString.startsWith("telegram://") -> "Telegram"
@@ -213,6 +293,7 @@ class SongInfoBottomSheetViewModel @Inject constructor(
             contentUriString.startsWith("qqmusic://") -> "QQ Music"
             contentUriString.startsWith("navidrome://") -> "Navidrome"
             contentUriString.startsWith("gdrive://") -> "Google Drive"
+            contentUriString.startsWith("youtube://") || contentUriString.contains("youtube") -> "YouTube"
             else -> null
         }
     }

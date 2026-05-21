@@ -17,6 +17,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import com.theveloper.pixelplay.data.remote.youtube.toNativeSong
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
@@ -37,6 +41,7 @@ import kotlinx.coroutines.FlowPreview
 @Singleton
 class SearchStateHolder @Inject constructor(
     private val musicRepository: MusicRepository,
+    private val youtubeSongRepository: com.theveloper.pixelplay.data.remote.youtube.SongRepository,
 ) {
     private companion object {
         const val SEARCH_DEBOUNCE_MS = 300L
@@ -92,9 +97,24 @@ class SearchStateHolder @Inject constructor(
 
                     try {
                         val currentFilter = _selectedSearchFilter.value
-                        musicRepository.searchAll(normalizedQuery, currentFilter).collect { resultsList ->
-                            // Sort: prioritize Song/Album matches over Artist/Playlist matches
-                            val sortedResults = resultsList.sortedWith(
+                        val localSearchFlow = musicRepository.searchAll(normalizedQuery, currentFilter)
+                        
+                        val youtubeSearchFlow = if (currentFilter == SearchFilterType.ALL || currentFilter == SearchFilterType.SONGS) {
+                            youtubeSongRepository.search(normalizedQuery).map { apiResult ->
+                                when (apiResult) {
+                                    is com.theveloper.pixelplay.data.remote.youtube.ApiResult.Success -> {
+                                        apiResult.data.map { SearchResultItem.SongItem(it.toNativeSong()) }
+                                    }
+                                    else -> emptyList()
+                                }
+                            }
+                        } else {
+                            flowOf(emptyList())
+                        }
+
+                        combine(localSearchFlow, youtubeSearchFlow) { localResults, youtubeResults ->
+                            val combined = youtubeResults + localResults
+                            combined.sortedWith(
                                 compareBy { result ->
                                     when (result) {
                                         is SearchResultItem.SongItem -> 0
@@ -104,12 +124,12 @@ class SearchStateHolder @Inject constructor(
                                     }
                                 }
                             )
-
+                        }.collect { resultsList ->
                             if (request.requestId != latestSearchRequestId.get()) {
                                 return@collect
                             }
 
-                            val immutableResults = sortedResults.toImmutableList()
+                            val immutableResults = resultsList.toImmutableList()
                             if (_searchResults.value != immutableResults) {
                                 _searchResults.value = immutableResults
                             }

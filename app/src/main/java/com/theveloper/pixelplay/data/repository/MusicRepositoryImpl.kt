@@ -59,6 +59,8 @@ import com.theveloper.pixelplay.utils.toHexString
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
+import com.theveloper.pixelplay.data.remote.youtube.SongRepository as YoutubeSongRepository
+import com.theveloper.pixelplay.data.remote.youtube.ApiResult as YoutubeApiResult
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -543,9 +545,73 @@ class MusicRepositoryImpl @Inject constructor(
 
     // --- Métodos de Búsqueda ---
 
+    private fun getYoutubeSearchFlow(query: String): Flow<List<Song>> = flow {
+        if (query.isBlank()) {
+            emit(emptyList())
+            return@flow
+        }
+        try {
+            val youtubeSongRepository = YoutubeSongRepository()
+            youtubeSongRepository.search(query).collect { apiResult ->
+                when (apiResult) {
+                    is YoutubeApiResult.Success -> {
+                        val mappedSongs = apiResult.data.map { ytSong ->
+                            val durationMs = parseYoutubeDuration(ytSong.duration)
+                            Song(
+                                id = "youtube_${ytSong.youtubeId}",
+                                title = ytSong.title,
+                                artist = ytSong.artist,
+                                artistId = -2L,
+                                artists = emptyList(),
+                                album = "YouTube",
+                                albumId = -2L,
+                                path = ytSong.audioFilePath ?: "",
+                                contentUriString = ytSong.audioFilePath ?: "",
+                                albumArtUriString = ytSong.thumbnailPath ?: ytSong.thumbnailHref,
+                                duration = durationMs,
+                                mimeType = "audio/mpeg",
+                                bitrate = null,
+                                sampleRate = null,
+                                youtubeId = ytSong.youtubeId
+                            )
+                        }
+                        emit(mappedSongs)
+                    }
+                    else -> {}
+                }
+            }
+        } catch (e: Exception) {
+            emit(emptyList())
+        }
+    }
+
+    private fun parseYoutubeDuration(durationStr: String?): Long {
+        if (durationStr.isNullOrBlank()) return 0L
+        return try {
+            val parts = durationStr.split(":")
+            var seconds = 0L
+            if (parts.size == 1) {
+                seconds = parts[0].toLongOrNull() ?: 0L
+            } else if (parts.size == 2) {
+                val minutes = parts[0].toLongOrNull() ?: 0L
+                val secs = parts[1].toLongOrNull() ?: 0L
+                seconds = minutes * 60 + secs
+            } else if (parts.size == 3) {
+                val hours = parts[0].toLongOrNull() ?: 0L
+                val minutes = parts[1].toLongOrNull() ?: 0L
+                val secs = parts[2].toLongOrNull() ?: 0L
+                seconds = hours * 3600 + minutes * 60 + secs
+            }
+            seconds * 1000L
+        } catch (e: Exception) {
+            0L
+        }
+    }
+
     override fun searchSongs(query: String, titleOnly: Boolean): Flow<List<Song>> {
         if (query.isBlank()) return flowOf(emptyList())
-        return combine(
+        
+        val localSearchFlow = combine(
             userPreferencesRepository.allowedDirectoriesFlow,
             userPreferencesRepository.blockedDirectoriesFlow
         ) { allowedDirs, blockedDirs ->
@@ -566,6 +632,12 @@ class MusicRepositoryImpl @Inject constructor(
             }.flatMapLatest { it }
         }.map { entities ->
             entities.map { it.toSong() }
+        }
+
+        val youtubeFlow = getYoutubeSearchFlow(query)
+
+        return combine(localSearchFlow, youtubeFlow) { localSongs, youtubeSongs ->
+            localSongs + youtubeSongs
         }.flowOn(Dispatchers.IO)
     }
 

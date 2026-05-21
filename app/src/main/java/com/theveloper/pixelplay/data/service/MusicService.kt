@@ -96,6 +96,9 @@ import com.theveloper.pixelplay.utils.MediaItemBuilder
 import com.theveloper.pixelplay.data.navidrome.NavidromeRepository
 import com.theveloper.pixelplay.di.AppScope
 import com.theveloper.pixelplay.presentation.viewmodel.ListeningStatsTracker
+import com.theveloper.pixelplay.data.remote.youtube.AutoQueueManager
+import com.theveloper.pixelplay.data.remote.youtube.QueuePreloadManager
+import com.theveloper.pixelplay.data.remote.youtube.DatastoreRepository as YoutubeDatastoreRepository
 import kotlin.math.abs
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
@@ -145,6 +148,8 @@ class MusicService : MediaLibraryService() {
     @Inject
     @AppScope
     lateinit var appScope: CoroutineScope
+    @Inject
+    lateinit var youtubeDatastoreRepository: YoutubeDatastoreRepository
 
     private var replayGainEnabled = false
     private var replayGainUseAlbumGain = false
@@ -402,6 +407,10 @@ class MusicService : MediaLibraryService() {
         engine.addPlayerSwapListener(playerSwapListener)
         engine.addTransitionDisplayPlayerListener(transitionDisplayPlayerListener)
         engine.addTransitionFinishedListener(transitionFinishedListener)
+
+        // Attach YouTube radio-mode auto-queue and stream-URL preloader
+        AutoQueueManager.attach(engine.masterPlayer, youtubeDatastoreRepository, serviceScope)
+        QueuePreloadManager.attach(engine.masterPlayer, this, youtubeDatastoreRepository, serviceScope)
 
         controller.initialize()
         initializeCastWearSync()
@@ -1673,6 +1682,10 @@ class MusicService : MediaLibraryService() {
         unregisterHeadsetReconnectMonitor()
         wearStatePublisher.clearState()
         replayGainJob?.cancel()
+
+        // Detach YouTube radio-mode auto-queue and stream-URL preloader
+        AutoQueueManager.detach(engine.masterPlayer)
+        QueuePreloadManager.detach(engine.masterPlayer)
 
         engine.removePlayerSwapListener(playerSwapListener)
         engine.removeTransitionDisplayPlayerListener(transitionDisplayPlayerListener)
