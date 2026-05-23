@@ -307,6 +307,7 @@ private fun SongPickerSheet(songs: List<Song>, onSongSelected: (Song) -> Unit) {
             .padding(16.dp), textAlign = TextAlign.Center)
         LazyColumn(modifier = Modifier
             .fillMaxWidth()
+            .weight(1f, fill = false)
             .padding(horizontal = 8.dp)) {
             items(songs, key = { it.id }) { song ->
                 SongPickerItem(song = song, onClick = { onSongSelected(song) })

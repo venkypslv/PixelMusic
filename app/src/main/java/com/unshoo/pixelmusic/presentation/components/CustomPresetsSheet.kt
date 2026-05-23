@@ -85,7 +85,9 @@ fun CustomPresetsSheet(
                     )
                 }
             } else {
-                LazyColumn {
+                LazyColumn(
+                    modifier = Modifier.weight(1f, fill = false)
+                ) {
                     items(presets, key = { it.name }) { preset ->
                         CustomPresetItem(
                             preset = preset,
