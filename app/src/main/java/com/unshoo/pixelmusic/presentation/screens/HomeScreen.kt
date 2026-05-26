@@ -344,6 +344,8 @@ fun HomeScreen(
                 onRefresh = {
                     isRefreshing = true
                     homePlaceholderRefreshGeneration++
+                    settingsViewModel.refreshLibrary()
+                    playerViewModel.forceUpdateDailyMix()
                     scope.launch {
                         delay(2000)
                         isRefreshing = false

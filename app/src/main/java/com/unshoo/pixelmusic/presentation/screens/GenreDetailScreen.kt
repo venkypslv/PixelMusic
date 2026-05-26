@@ -271,13 +271,13 @@ fun GenreDetailScreen(
         )
     }
 
-    MaterialTheme(colorScheme = genreColorScheme) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .nestedScroll(nestedScrollConnection)
-                .background(MaterialTheme.colorScheme.background) // Uses new theme background
-        ) {
+    // Uses main app theme instead of isolated genre color scheme to fix "white UI" mismatch
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .nestedScroll(nestedScrollConnection)
+            .background(MaterialTheme.colorScheme.background)
+    ) {
             // Optimization: Cache Dp conversions
             val currentTopBarHeightDp = with(density) { topBarHeight.value.toDp() }
 
@@ -623,7 +623,6 @@ fun GenreDetailScreen(
             }
         }
     }
-}
 
 private fun genreFastScrollLabel(
     items: List<GenreDetailListItem>,
